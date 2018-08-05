@@ -1,0 +1,445 @@
+---
+title: "nyc_phil"
+output: html_document
+---
+
+```{r, echo=FALSE, warning=FALSE, error=FALSE, message=FALSE}
+library(jsonlite)
+library(stringr)
+library(XML)
+library(RCurl)
+library(filesstrings)
+library(ggplot2)
+library(ggrepel)
+library(tidyr)
+library(rvest)
+library(dplyr)
+library(fuzzyjoin)
+```
+
+
+
+```{r, echo=FALSE, warning=FALSE, error=FALSE, message=FALSE}
+
+works <- read.csv("works.csv")
+
+works <- subset(works, works$ID != "0*")
+
+
+compcount <- works %>% 
+  group_by(composerName) %>%
+  summarise(count=n())
+
+ggplot(compcount, aes(x=count))+
+  geom_histogram()+
+  scale_x_log10()
+
+composers <- as.character(works$composerName)
+
+
+
+
+
+
+works$composers_firstname <- gsub(".*, *", "", works$composerName)
+works$composers_firstname1 <- gsub(" .*", "", works$composers_firstname)
+works$composers_surname <- gsub(", .*", "", works$composerName)
+works$name1sur <- paste(works$composers_firstname1, works$composers_surname)
+works$initsur <- paste(substr(works$composers_firstname, 1,1), works$composers_surname)
+
+
+```
+
+
+
+```{r, echo=FALSE, warning=FALSE, error=FALSE, message=FALSE}
+
+
+
+
+composers_name <- paste(composers_firstname, composers_surname)
+
+
+composers_nondup <- composers[duplicated(composers) == FALSE]
+composers_firstname <- gsub(".*, *", "", composers_nondup)
+composers_surname <- gsub(", .*", "", composers_nondup)
+composers_name <- paste(composers_firstname, composers_surname)
+
+nycompdf <- data.frame(firstsur= composers_name, surfirst= composers_nondup, sur= composers_surname)
+
+
+```
+
+
+
+
+```{r, echo=FALSE, warning=FALSE, error=FALSE, message=FALSE}
+pagelist <- c("https://musicalics.com/en/composers_alphabet", paste0("https://musicalics.com/en/composers_alphabet?page=", 1:143))
+
+compdf <- data.frame(surname= character(), firstname=character(), birthdate=numeric(), deathdate=numeric())
+
+
+for (i in pagelist){
+p <- i %>% 
+  read_html() %>%
+  html_nodes(xpath="/html/body/div[1]/div[2]/div/section/div[3]/div/div/div/div/div[3]") %>%
+  html_text()
+
+
+p2 <-strsplit(p,")")[[1]]
+p2 <-   sub("^[\\\n ]+", "", p2)
+surname <- sub("<.*", "", sub("\\s+\\\n.+", "", p2))
+p2 <- sub("^\\w+\\s\\w*\\s*", "", p2)
+firstname <-  sub("<.+", "", sub("\\s+\\\n.+", "", p2))
+p2 <- sub("^\\w+\\s\\w*\\s*\\(", "", p2)
+birthdate <- as.numeric(sub("\\s.*", "", p2))
+deathdate <- as.numeric(sub("\\d+\\s+\\\n\\s+-\\s+", "", p2))
+  
+pgdf <- data.frame(surname, firstname, birthdate, deathdate) 
+compdf <- rbind(compdf, pgdf)
+print(i)
+}
+
+
+
+for (i in pagelist[90:143]){
+p <- i %>% 
+  read_html() %>%
+  html_nodes(xpath="/html/body/div[1]/div[2]/div/section/div[3]/div/div/div/div/div[3]") %>%
+  html_text()
+
+
+p2 <-strsplit(p,")")[[1]]
+p2 <-   sub("^[\\\n ]+", "", p2)
+surname <- sub("<.*", "", sub("\\s+\\\n.+", "", p2))
+p2 <- sub("^\\w+\\s\\w*\\s*", "", p2)
+firstname <-  sub("<.+", "", sub("\\s+\\\n.+", "", p2))
+p2 <- sub("^\\w+\\s\\w*\\s*\\(", "", p2)
+birthdate <- as.numeric(sub("\\s.*", "", p2))
+deathdate <- as.numeric(sub("\\d+\\s+\\\n\\s+-\\s+", "", p2))
+  
+pgdf <- data.frame(surname, firstname, birthdate, deathdate) 
+compdf <- rbind(compdf, pgdf)
+print(i)
+}
+
+
+compdf$firstsur <- paste(compdf$firstname, compdf$surname)
+compdf$composerName <- paste0(compdf$surname, ",  ", compdf$firstname)
+compdf$initsur <- paste(substr(compdf$firstname,1,1), compdf$surname)
+compdf$name1sur <- paste( gsub(" .*", "", compdf$firstname), compdf$surname)
+
+compdf$name1sur <- paste( gsub(" .*", "", compdf$firstname), compdf$surname)
+
+
+compdf <- subset(compdf, !duplicated(compdf$firstsur))%>%
+  filter(surname != "" )
+
+
+
+
+#compdf <- subset(compdf, duplicated(compdf$composerName) ==F)
+
+
+
+
+```
+
+
+
+```{r, echo=FALSE, warning=FALSE, error=FALSE, message=FALSE}
+works <- subset(works, works$composerName != "" & works$composerName != "Traditional,") %>%
+  mutate(num=rownames(.))
+
+works1 <- inner_join(works, select(compdf,c(composerName, birthdate, deathdate)) , by="composerName")
+
+compdffns <- subset(compdf, !(compdf$name1sur %in% compdf$name1sur[duplicated(compdf$name1sur)] ))
+
+
+works2 <- subset(works, works$num %in% works1$num ==F) %>%
+  inner_join(select(compdf,c(name1sur, birthdate, deathdate)), by="name1sur")
+
+
+
+
+compdfnr <- subset(compdf, !(compdf$initsur %in% compdf$initsur[duplicated(compdf$initsur)] ))
+
+works3 <- subset(works, !(works$num %in% works1$num | works$num %in% works2$num)) %>%
+  
+  
+  
+
+#  subset(!(.$initsur %in% .$initsur[duplicated(.$initsur)] )) %>%
+#  subset(!(.$initsur %in% .$initsur[duplicated(.$initsur)== T]))
+  inner_join(select(compdfnr,c(initsur, birthdate, deathdate)), by="initsur")
+
+
+works4 <- rbind(works1, works2, works3) %>%
+  mutate(nd =  paste0(num, birthdate, deathdate), idd= paste0(ID,initsur, birthdate, deathdate)) 
+  filter(duplicated(idd))
+  
+works4 <- subset(works4, as.numeric(works4$birthdate) <  as.numeric(works4$seasonstart))
+
+```
+
+Now get their dates of birth and death
+
+
+
+```{r, echo=FALSE, warning=FALSE, error=FALSE, message=FALSE}
+
+works4$deathdate <- as.numeric(works4$deathdate)
+
+works4$seasonstart <- as.numeric(substr(works4$season,1,4))
+works4$seasonend <- as.numeric(works4$seasonstart +1)
+works4$deadatperf <- works4$deathdate < works4$seasonend
+
+
+ggplot(works4, aes(x=seasonstart, y=deathdate, colour=deadatperf))+
+  geom_point(alpha=0.1)+
+  theme_minimal()+
+  scale_colour_manual(values=c("orangered", "dark grey"), name=NULL, labels=c("Performances of \nliving composers","Performances of \ndead composers", ""))+
+#  geom_vline(xintercept=seq(from=1800, to=2000, by=50), alpha=0.2)+
+  #xlim(1842,2017)
+#  ylim(1670, 1980)
+  xlab("Performance Season")+
+  ylab("Year of composer's birth")+
+  theme(legend.direction = 'horizontal', 
+        legend.position = 'bottom',
+        legend.key.size = unit(1.5, 'lines'))+
+  ggtitle("Performances of the New York Philharmonic", subtitle = "1842-2017")+
+  guides(colour = guide_legend(override.aes = list(alpha=1)))+
+  guides(alpha=F)
+
+
+
+```
+
+
+
+```{r, echo=FALSE, warning=FALSE, error=FALSE, message=FALSE}
+
+
+perfs <- works4 %>%
+#  filter(works4$seasonstart > 1900)
+  filter(is.na(works4$deadatperf)==F)%>%
+  group_by(seasonstart) %>%
+#  summarise( )
+  summarize(totperf =n())
+
+percdead <- works4 %>%
+  count(seasonstart, deadatperf) %>%
+  group_by(seasonstart) %>%
+  filter(is.na(deadatperf) == F) %>%
+  left_join(perfs, by="seasonstart") %>%
+  mutate(percdead = n/totperf, startyr = seasonstart) %>%
+  filter(deadatperf == F)
+
+
+
+ggplot(percdead, aes(x=seasonstart, y=percdead))+
+  geom_line()+
+  geom_smooth()
+
+
+
+(p=ggplot(percdead, aes(x=seasonstart, y=percdead))+
+  geom_area(stat='identity',alpha=0.6, fill="cornflower blue", size=1, colour="black")+
+  theme_minimal()+
+  scale_fill_manual(values=c("white","forest green", "black"), guide=F)+
+  ylab("Performances of works of living composers (%)")+
+  xlab("Performance Season")+
+  ggtitle("The decreasing popularity of living composers", subtitle = "Performances of the New York Philharmonic (1842-2017)")
+)
+
+```
+
+
+
+
+
+
+```{r, echo=FALSE, warning=FALSE, error=FALSE, message=FALSE}
+
+
+webpage <- getURL("https://en.wikipedia.org/wiki/List_of_composers_by_name")
+webpage <- readLines(tc <- textConnection(webpage)); close(tc)
+
+lines <- as.character(webpage[83:4721])
+names <- gsub(" \\(.*\\)", "", gsub("\\\">.*", "", gsub(".*title=.","", lines)))
+
+
+
+birth <- as.numeric(str_extract(lines, "[0-9][0-9][0-9][0-9]"))
+death <- as.numeric(gsub("\\)", "", str_extract(lines, "[0-9][0-9][0-9][0-9]\\)")))
+
+
+
+death[death=birth] <- NA
+
+stillalive <- grepl("born", lines) & birth > 1900 #remove any dodgy still alive valus produced by unsurety in relation to dates of birth/death
+death[stillalive== TRUE] <- NA
+
+
+
+
+pagedf <- data.frame(line=lines, name=names, birth, death, stillalive)
+
+
+composerdetails <- subset(pagedf, pagedf$name %in% compdf$firstsur) 
+composerdetails <- composerdetails[order(composerdetails$name),] 
+compdf <- subset(compdf, compdf$firstsur %in% composerdetails$name)
+compdf <- compdf[order(compdf$firstsur),]
+composerdetails <- subset(composerdetails, duplicated(composerdetails$name)==F)
+
+composerdetails <- cbind(composerdetails, compdf)
+
+works_mcomp <- subset(works, works$composerName %in% composerdetails$surfirst)
+works_mcomp$compbirth <- 0
+works_mcomp$compdeath <- 0
+
+
+for (i in 1:length(composerdetails$line)){
+  x = works_mcomp$composerName == composerdetails$surfirst[i]
+  works_mcomp$compbirth[x] <- composerdetails$birth[i]
+  works_mcomp$compdeath[x] <- composerdetails$death[i]
+  works_mcomp$stillalive[x] <- composerdetails$stillalive[i]
+  works_mcomp$sur[x] <- as.character(composerdetails$sur[i])
+}
+
+
+  
+```
+
+
+
+```{r, echo=FALSE, warning=FALSE, error=FALSE, message=FALSE}
+works_mcomp$seasonstart <- as.numeric(substr(works_mcomp$season,1,4))
+works_mcomp$deadlong <- works_mcomp$seasonstart-works_mcomp$compdeath
+#works_mcomp$deadlong[works_mcomp$deadlong<0|stillalive==TRUE] <- 0
+
+works_mcomp$century <- round(works_mcomp$compbirth) +1
+works_mcomp$deadatperf <- works_mcomp$deadlong < 0
+
+#ggplot(works_mcomp, aes(x=seasonstart, y)
+
+works_fam <- works_mcomp
+works_fam$deadatperf[works_fam$stillalive == TRUE] <- TRUE
+
+compop <- data.frame(pop= table(works_fam$composerName), name=names(table(works_fam$composerName)))
+compoptop <- subset(compop, compop$pop.Freq > 1000)
+
+
+works_popcomp <- subset(works_fam, works_fam$composerName %in% compoptop$pop.Var1)
+
+#works_popcomp$composerName <- factor(works_popcomp$composerName, levels= works_popcomp$composerName[order(works_popcomp$compbirth, decreasing= TRUE)])
+
+works_fam$major <- works_fam$composerName %in% works_popcomp$composerName
+
+
+perfs <- works_mcomp %>%
+  filter(is.na(deadatperf)==F)%>%
+  group_by(season) %>%
+  summarise(totperf =n())
+
+
+percdead <- works_mcomp %>%
+  count(season, deadatperf) %>%
+  group_by(season) %>%
+  filter(is.na(deadatperf) == F) %>%
+  left_join(perfs, by="season") %>%
+  mutate(percdead = n/totperf, startyr = as.numeric(substr(season,1,4)))
+
+````
+
+
+```{r, echo=FALSE, warning=FALSE, error=FALSE, message=FALSE}
+works_fam <- left_join(works_fam, perfs, by='season')%>%
+  filter(compbirth < seasonstart)
+
+
+works_fam$alph <- 10/works_fam$totperf
+
+(p=ggplot(works_fam, aes(x=seasonstart, y=compbirth, colour=deadatperf,alpha=alph))+
+  geom_point(shape=15)+
+  theme_minimal()+
+  scale_colour_manual(values=c("dark blue", "forest green"), name=NULL, labels=c("Performances of \ndead composers", "Performances of \nliving composers", ""))+
+  geom_vline(xintercept=seq(from=1800, to=2000, by=50), alpha=0.2)+
+  xlim(1842,2017)+
+  ylim(1670, 1980)+
+  xlab("Performance Season")+
+  ylab("Year of composer's birth")+
+  theme(legend.direction = 'horizontal', 
+        legend.position = 'bottom',
+        legend.key.size = unit(1.5, 'lines'))+
+  ggtitle("Performances of the New York Philharmonic", subtitle = "1842-2017")+
+  guides(colour = guide_legend(override.aes = list(alpha=1)))+
+  guides(alpha=F)
+)
+
+
+ggsave(plot=p, device=png, file="allperf.png", height=500, width=800, limitsize=FALSE)
+````
+
+
+```{r, echo=FALSE, warning=FALSE, error=FALSE, message=FALSE}
+
+
+
+(p=ggplot(percdead, aes(x=startyr, y=percdead, fill=deadatperf))+
+  geom_bar(stat='identity')+
+  theme_minimal()+
+  scale_fill_manual(values=c("white","forest green", "black"), guide=F)+
+  ylab("Performances of works of living composers (%)")+
+  xlab("Performance Season")+
+  ggtitle("The decreasing popularity of living composers", subtitle = "Performances of the New York Philharmonic (1842-2017)")
+)
+
+ggsave(plot=p, device=png, file="percdead.png", height=600, width=900, limitsize=FALSE)
+ 
+  
+```
+
+
+
+```{r, echo=FALSE, warning=FALSE, error=FALSE, message=FALSE}
+works_popcomp$compdeath[works_popcomp$composerName == "Debussy,  Claude"] <- 1918
+works_popcomp$compbirth[works_popcomp$composerName == "Debussy,  Claude"] <- 1862
+
+
+(p=ggplot(works_popcomp, aes(seasonstart))+
+  geom_freqpoly(binwidth=5)+
+  theme(legend.position = 'bottom')+
+  facet_wrap(~sur, ncol=3)+
+  scale_fill_manual(values=c("darkblue", "forest green"))+
+  geom_segment(aes(x=compbirth, xend=compdeath, y=-20,yend=-20), colour="forest green", alpha=0.2, size=1.5)+
+  xlab("Performance Season")+
+  ylab("Performances")+
+  geom_vline(xintercept=seq(from=1800, to=2000, by=50), alpha=0.2)+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  theme_minimal()+
+  theme(strip.background = element_rect(fill = NA, colour = "black"))+
+  ggtitle("Popularity of composers", subtitle = "12 most popular composers \nperformances of the NYC Philharmonic (1842-2017)")
+)
+
+ggsave(plot=p, device=png, file="popcompovertime.png", height=500, width=900, limitsize=FALSE)
+ 
+ggsave(plot=p, device=pdf, file="popcompovertime.pdf", height=10, width=8, limitsize=FALSE)
+
+
+```
+
+
+```{r, echo=FALSE, warning=FALSE, error=FALSE, message=FALSE}
+ggplot(works_fam, aes(deadlong))+
+  geom_freqpoly(binwidth=20)+
+  theme_minimal()+
+  xlim(-80,220)+
+  xlab("Years since composer's death")+
+  ylab("Popularity (performances)")+ 
+  geom_vline(xintercept = 0, lty=2)+
+  geom_segment(aes(x=-80, xend=0, y=-40,yend=-40), colour="forest green", alpha=0.2, size=3.5)+
+  ggtitle("Popularity of composers before and after death", subtitle = "(NYC Philharmonic)")
+  
+  
+```
